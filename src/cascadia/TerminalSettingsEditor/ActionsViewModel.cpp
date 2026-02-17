@@ -137,7 +137,13 @@ namespace winrt::Microsoft::Terminal::Settings::Editor::implementation
 
     winrt::hstring CommandViewModel::DisplayNameAndKeyChordAutomationPropName()
     {
-        return DisplayName() + L", " + FirstKeyChordText();
+        auto result = DisplayName() + L", " + FirstKeyChordText();
+        const auto size = _KeyChordList.Size();
+        if (size > 1)
+        {
+            result = result + L" " + hstring{ RS_fmt(L"Actions_AdditionalKeyChords", winrt::to_hstring(size - 1)) };
+        }
+        return result;
     }
 
     winrt::hstring CommandViewModel::FirstKeyChordText()
@@ -147,6 +153,35 @@ namespace winrt::Microsoft::Terminal::Settings::Editor::implementation
             return _KeyChordList.GetAt(0).KeyChordText();
         }
         return L"";
+    }
+
+    winrt::hstring CommandViewModel::AdditionalKeyChordCountText()
+    {
+        const auto size = _KeyChordList.Size();
+        if (size > 1)
+        {
+            return winrt::hstring{ L"+" + winrt::to_hstring(size - 1) };
+        }
+        return L"";
+    }
+
+    winrt::hstring CommandViewModel::AdditionalKeyChordTooltipText()
+    {
+        const auto size = _KeyChordList.Size();
+        if (size <= 1)
+        {
+            return L"";
+        }
+        std::wstring result;
+        for (uint32_t i = 1; i < size; ++i)
+        {
+            if (!result.empty())
+            {
+                result += L"\n";
+            }
+            result += std::wstring_view{ _KeyChordList.GetAt(i).KeyChordText() };
+        }
+        return winrt::hstring{ result };
     }
 
     winrt::hstring CommandViewModel::ID()
@@ -175,6 +210,7 @@ namespace winrt::Microsoft::Terminal::Settings::Editor::implementation
         kbdVM->IsInEditMode(true);
         _RegisterKeyChordVMEvents(*kbdVM);
         KeyChordList().Append(*kbdVM);
+        FocusContainer.raise(*this, *kbdVM);
     }
 
     winrt::hstring CommandViewModel::ActionNameTextBoxAutomationPropName()
@@ -220,7 +256,10 @@ namespace winrt::Microsoft::Terminal::Settings::Editor::implementation
                         break;
                     }
                 }
-                actionsPageVM.DeleteKeyChord(args);
+                if (args)
+                {
+                    actionsPageVM.DeleteKeyChord(args);
+                }
             }
         });
         kcVM.PropertyChanged([weakThis{ get_weak() }](const IInspectable& sender, const Windows::UI::Xaml::Data::PropertyChangedEventArgs& args) {
@@ -499,7 +538,13 @@ namespace winrt::Microsoft::Terminal::Settings::Editor::implementation
         auto lifetime = get_strong();
 
         static constexpr winrt::guid clientGuidFiles{ 0xbd00ae34, 0x839b, 0x43f6, { 0x8b, 0x94, 0x12, 0x37, 0x1a, 0xfe, 0xea, 0xb5 } };
-        const auto parentHwnd{ reinterpret_cast<HWND>(_WindowRoot.GetHostingWindow()) };
+
+        const auto windowRoot = WindowRoot();
+        if (!windowRoot)
+        {
+            co_return;
+        }
+        const auto parentHwnd{ reinterpret_cast<HWND>(windowRoot.GetHostingWindow()) };
         auto path = co_await OpenFilePicker(parentHwnd, [](auto&& dialog) {
             THROW_IF_FAILED(dialog->SetClientGuid(clientGuidFiles));
             try
@@ -522,8 +567,13 @@ namespace winrt::Microsoft::Terminal::Settings::Editor::implementation
         auto lifetime = get_strong();
 
         static constexpr winrt::guid clientGuidFolders{ 0xa611027, 0x42be, 0x4665, { 0xaf, 0xf1, 0x3f, 0x22, 0x26, 0xe9, 0xf7, 0x4d } };
-        ;
-        const auto parentHwnd{ reinterpret_cast<HWND>(_WindowRoot.GetHostingWindow()) };
+
+        const auto windowRoot = WindowRoot();
+        if (!windowRoot)
+        {
+            co_return;
+        }
+        const auto parentHwnd{ reinterpret_cast<HWND>(windowRoot.GetHostingWindow()) };
         auto path = co_await OpenFilePicker(parentHwnd, [](auto&& dialog) {
             THROW_IF_FAILED(dialog->SetClientGuid(clientGuidFolders));
             try
@@ -1031,6 +1081,11 @@ namespace winrt::Microsoft::Terminal::Settings::Editor::implementation
         {
             // if we're in edit mode, populate the text box with the current keys
             ProposedKeys(_currentKeys);
+        }
+        else if (!_currentKeys)
+        {
+            // we have left edit mode but don't have any current keys - delete this view model
+            DeleteKeyChord();
         }
     }
 
